@@ -48,31 +48,46 @@ class Inpainting(object):
     def Encode(self, x):
         input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x)
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
-        conv1 = lasagne.layers.Conv2DLayer(dimshuffle1, 32, (5,5))
-        print conv1.output_shape
-        pool1 = lasagne.layers.Pool2DLayer(conv1, (3,3), stride=2)
+        conv1 = lasagne.layers.Conv2DLayer(dimshuffle1, 12, (3,3), pad='same')
+#         print conv1.output_shape
+        pool1 = lasagne.layers.Pool2DLayer(conv1, (2,2))
         print pool1.output_shape
-        conv2 = lasagne.layers.Conv2DLayer(pool1, 128, (5,5))
-        print conv2.output_shape
-        pool2 = lasagne.layers.Pool2DLayer(conv2, (3,3), stride=2)
+        conv2 = lasagne.layers.Conv2DLayer(pool1, 48, (3,3), pad='same')
+#         print conv2.output_shape
+        pool2 = lasagne.layers.Pool2DLayer(conv2, (2,2))
         print pool2.output_shape
-        full1 = lasagne.layers.DenseLayer(pool2, 2048, num_leading_axes=1)
-        full2 = lasagne.layers.DenseLayer(pool2, 512, num_leading_axes=1)
+        conv3 = lasagne.layers.Conv2DLayer(pool2, 192, (3,3), pad='same')
+#         print conv3.output_shape
+        pool3 = lasagne.layers.Pool2DLayer(conv3, (2,2))
+        print pool3.output_shape
+        conv4 = lasagne.layers.Conv2DLayer(pool3, 768, (3,3), pad='same')
+        pool4 = lasagne.layers.Pool2DLayer(conv4, (2,2))
+        print pool4.output_shape
+#         full1 = lasagne.layers.DenseLayer(pool3, 2048, num_leading_axes=1)
+#         full2 = lasagne.layers.DenseLayer(pool2, 512, num_leading_axes=1)
         
-        return full1
+        return pool4
     
     def Decode(self, encoder):
-        full1 = lasagne.layers.DenseLayer(encoder, 2048, num_leading_axes=1)
-        reshape1 = lasagne.layers.reshape(full1, ([0], 128, 4, 4))
-        deconv1 = lasagne.layers.Deconv2DLayer(reshape1, 64, (3, 3), stride=2) #32*8*8
-        print deconv1.output_shape
-        deconv2 = lasagne.layers.Deconv2DLayer(deconv1, 32, (3, 3), stride=2) #16*16*16
+#         full1 = lasagne.layers.DenseLayer(encoder, 2048, num_leading_axes=1)
+#         reshape1 = lasagne.layers.reshape(full1, ([0], 128, 4, 4))
+#         print reshape1.output_shape
+        channel_full1 = lasagne.layers.DenseLayer(encoder, 16, num_leading_axes=2)
+        reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
+        print reshape1.output_shape
+        deconv = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
+#         print deconv1.output_shape
+        deconv0 = lasagne.layers.Deconv2DLayer(deconv, 192, (3, 3), crop='same')
+        print deconv0.output_shape
+        deconv1 = lasagne.layers.Deconv2DLayer(deconv0, 192, (2, 2), stride=2)
+#         print deconv1.output_shape
+        deconv2 = lasagne.layers.Deconv2DLayer(deconv1, 48, (3, 3), crop='same')
         print deconv2.output_shape
-        deconv3 = lasagne.layers.Deconv2DLayer(deconv2, 16, (5, 5)) #8*32*32
-        print deconv3.output_shape
-        deconv4 = lasagne.layers.Deconv2DLayer(deconv3, 8, (5, 5)) #8*32*32
+        deconv3 = lasagne.layers.Deconv2DLayer(deconv2, 48, (2, 2), stride=2)
+#         print deconv3.output_shape
+        deconv4 = lasagne.layers.Deconv2DLayer(deconv3, 12, (3, 3), crop='same')
         print deconv4.output_shape
-        deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 3, (6, 6)) #8*32*32
+        deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 3, (1, 1), nonlinearity=None)
         print deconv5.output_shape
         
         return deconv5
@@ -112,7 +127,7 @@ class Inpainting(object):
                     optimizer=lasagne.updates.adam,
                     patience=5, 
                     lrate=0.0003, 
-                    dispFreq=50, 
+                    dispFreq=100, 
                     validFreq=-1, 
                     saveFreq=-1, 
                     max_epochs=40):
@@ -152,7 +167,7 @@ class Inpainting(object):
                     uidx += 1
     
                     # Select the random examples for this minibatch
-                    x = [dataset.train_x[t] + dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
+                    x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
                          for t in train_index]
                     y = [dataset.train_y[t]for t in train_index]
     
