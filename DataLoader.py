@@ -9,6 +9,8 @@ import PIL.Image as Image
 import numpy
 import cPickle
 
+rng = numpy.random.RandomState(seed=123456)
+
 class Mscoco(object):
     '''
     classdocs
@@ -56,4 +58,9 @@ class Mscoco(object):
         self.train_x, self.train_y, self.train_c = load_dataset(path + 'train2014/', captions)
         self.valid_x, self.valid_y, self.valid_c = load_dataset(path + 'val2014/', captions)
         print 'Done loading'
+        
+    def prepare_data(self, x, y):
+        x = numpy.array(x, dtype='float32')
+        x = x * (1 - self.mask) + rng.randint(0, 256, x.shape) * self.mask
+        return x.astype('float32'), numpy.array(y, dtype='int64')
                 

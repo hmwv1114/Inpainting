@@ -46,7 +46,7 @@ class Inpainting(object):
         print('Done')
         
     def Encode(self, x):
-        input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x)
+        input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x/255.)
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         conv1 = lasagne.layers.Conv2DLayer(dimshuffle1, 12, (3,3), pad='same')
 #         print conv1.output_shape
@@ -81,50 +81,60 @@ class Inpainting(object):
         deconv0 = lasagne.layers.Deconv2DLayer(deconv, 192, (3, 3), crop='same')
         print deconv0.output_shape
         deconv1 = lasagne.layers.Deconv2DLayer(deconv0, 192, (2, 2), stride=2)
-#         print deconv1.output_shape
+        print deconv1.output_shape
         deconv2 = lasagne.layers.Deconv2DLayer(deconv1, 48, (3, 3), crop='same')
         print deconv2.output_shape
         deconv3 = lasagne.layers.Deconv2DLayer(deconv2, 48, (2, 2), stride=2)
-#         print deconv3.output_shape
+        print deconv3.output_shape
         deconv4 = lasagne.layers.Deconv2DLayer(deconv3, 12, (3, 3), crop='same')
         print deconv4.output_shape
         deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
         print deconv5.output_shape
-        deconv6 = lasagne.layers.Deconv2DLayer(deconv5, 3, (3, 3), crop='same')
+        deconv6 = lasagne.layers.Deconv2DLayer(deconv5, 3, (3, 3), crop='same', 
+                                               nonlinearity=lasagne.nonlinearities.sigmoid)
         print deconv6.output_shape
+        output = lasagne.layers.dimshuffle(deconv6, [0,2,3,1])
+        print output.output_shape
         
-        return deconv6
+        return output
     
-    def Cost(self, y_hat, y):
-        cost = tensor.sqr(y_hat - y).mean()
-        
+    def Cost_loglikelihood(self, py, y):
+        py = py.reshape([py.shape[0]*py.shape[1]*py.shape[2]*py.shape[3], 256])
+        y = y.flatten()
+        offset = 1e-20
+        cost = -tensor.log(py[y] + offset).mean()
+        return cost
+    
+    def Cost_l2(self, y_hat, y):
+        cost = tensor.sqrt(tensor.mean(tensor.sqr(y_hat - y), axis=[1,2,3])).mean()
         return cost
         
     def init_model(self):
         print 'Initialing model'
         self.x = tensor.tensor4(name='x', dtype='float32')
-        self.y = tensor.tensor4(name='y', dtype='float32')
+        self.y = tensor.tensor4(name='y', dtype='int64')
         
         self.encoder = self.Encode(self.x)
         
         self.decoder = self.Decode(self.encoder)
         
-        self.y_hat = lasagne.layers.get_output(self.decoder).dimshuffle([0,2,3,1])
+        self.y_hat = lasagne.layers.get_output(self.decoder) * 255.
         
-        self.cost = self.Cost(self.y_hat, self.y)
+        self.cost = self.Cost_l2(self.y_hat, self.y)
         
         self.f_cost = theano.function([self.x, self.y], self.cost, name='cost function')
         
         self.trainable_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         
         self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat[:, 16:48, 16:48])
-        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
+        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48].astype('float32'))
+        self.f_yhat = theano.function([self.x], self.y_hat, name='yhat')
         self.f_generate = theano.function([self.x], self.generate, name='Generate')
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
     def learn_model(self, dataset, 
-                    batch_size=64, 
+                    batch_size=32, 
                     valid_batch_size=64, 
                     saveto='params/model', 
                     optimizer=lasagne.updates.adam,
@@ -177,8 +187,7 @@ class Inpainting(object):
                     # Get the data in numpy.ndarray format
                     # This swap the axis!
                     # Return something of shape (minibatch maxlen, n samples)
-                    x = numpy.array(x, dtype='float32')
-                    y = numpy.array(y, dtype='float32')
+                    x, y = dataset.prepare_data(x, y)
                     n_samples += x.shape[0]
     
                     cost = self.f_update(x, y)
@@ -194,16 +203,18 @@ class Inpainting(object):
     
                     if numpy.mod(uidx, validFreq) == 0:
                         #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_cost, dataset.valid_x, dataset.valid_y, kf_valid)
+                        valid_decode_err = error(self.f_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
                         
+                        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'))
                         generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'))
                         original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
-                                                   numpy.array(dataset.valid_y[:10], dtype='float32'))
+                                                   numpy.array(dataset.valid_y[:10], dtype='int64'))
                         
+                        y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
                         generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
                         original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
                         
-                        fig = numpy.int64(numpy.concatenate([original, generate], axis=1))
+                        fig = numpy.int64(numpy.concatenate([original, generate, y_hat], axis=1))
                         fig = numpy.clip(fig, 0, 255).astype('uint8')
                         print fig.max(), fig.min()
                         Image.fromarray(fig, mode='RGB').show()
@@ -246,7 +257,7 @@ class Inpainting(object):
     
         #kf_train_sorted = get_minibatches_idx(len(train), batch_size)
         #train_err = pred_error(f_sentiment, prepare_data, train, kf_train_sorted)
-        valid_decode_err = error(self.f_cost, dataset.valid_x, dataset.valid_y, kf_valid)
+        valid_decode_err = error(self.f_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
     
         print('Valid decode error:', valid_decode_err)
         if saveto:
