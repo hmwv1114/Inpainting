@@ -72,6 +72,7 @@ class Inpainting(object):
 #         full1 = lasagne.layers.DenseLayer(encoder, 2048, num_leading_axes=1)
 #         reshape1 = lasagne.layers.reshape(full1, ([0], 128, 4, 4))
 #         print reshape1.output_shape
+#         encoder = lasagne.layers.dropout(encoder, p=0.5)
         channel_full1 = lasagne.layers.DenseLayer(encoder, 16, num_leading_axes=2)
         reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
         print reshape1.output_shape
@@ -87,10 +88,12 @@ class Inpainting(object):
 #         print deconv3.output_shape
         deconv4 = lasagne.layers.Deconv2DLayer(deconv3, 12, (3, 3), crop='same')
         print deconv4.output_shape
-        deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 3, (1, 1), nonlinearity=None)
+        deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
         print deconv5.output_shape
+        deconv6 = lasagne.layers.Deconv2DLayer(deconv5, 3, (3, 3), crop='same')
+        print deconv6.output_shape
         
-        return deconv5
+        return deconv6
     
     def Cost(self, y_hat, y):
         cost = tensor.sqr(y_hat - y).mean()
@@ -114,8 +117,8 @@ class Inpainting(object):
         
         self.trainable_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         
-        self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat)
-        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y)
+        self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat[:, 16:48, 16:48])
+        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
         self.f_generate = theano.function([self.x], self.generate, name='Generate')
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'

@@ -41,7 +41,8 @@ class Mscoco(object):
                     continue
                 
                 x.append(img * (1 - self.mask))
-                y.append(img[self.mask > 0].reshape((32,32,3)))
+#                 y.append(img[self.mask > 0].reshape((32,32,3)))
+                y.append(img)
                 c.append(captions[imgfile[:-4]])
                 
                 n += 1
