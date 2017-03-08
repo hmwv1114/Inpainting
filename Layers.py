@@ -3,7 +3,6 @@ Created on Mar 8, 2017
 
 @author: Yikang
 '''
-
 import theano.tensor as tensor
 import lasagne
 from lasagne import init, nonlinearities

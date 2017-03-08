@@ -15,6 +15,7 @@ import PIL.Image as Image
 from Utils import *
 
 from DataLoader import Mscoco
+from PixelConvLayer import pixelConvLayer
 
 class Inpainting(object):
     '''
@@ -84,9 +85,11 @@ class Inpainting(object):
         print deconv4.output_shape
         depool5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
         deconv5 = lasagne.layers.Deconv2DLayer(depool5, 3, (3, 3), crop='same', 
-                                               nonlinearity=None)
+#                                                nonlinearity=None
+                                               )
         print deconv5.output_shape
-        output = lasagne.layers.dimshuffle(deconv5, [0,2,3,1])
+        draft = lasagne.layers.dimshuffle(deconv5, [0,2,3,1])
+        output = pixelConvLayer(draft, 3, 3, num_layers=3)
         print output.output_shape
         
         return output
