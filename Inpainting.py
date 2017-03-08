@@ -63,37 +63,33 @@ class Inpainting(object):
         conv4 = lasagne.layers.Conv2DLayer(pool3, 768, (3,3), pad='same')
         pool4 = lasagne.layers.Pool2DLayer(conv4, (2,2))
         print pool4.output_shape
-#         full1 = lasagne.layers.DenseLayer(pool3, 2048, num_leading_axes=1)
-#         full2 = lasagne.layers.DenseLayer(pool2, 512, num_leading_axes=1)
+#         conv5 = lasagne.layers.Conv2DLayer(pool4, 768, (3,3), pad='same')
+#         pool5 = lasagne.layers.Pool2DLayer(conv5, (2,2))
+#         print pool5.output_shape
         
         return pool4
     
     def Decode(self, encoder):
-#         full1 = lasagne.layers.DenseLayer(encoder, 2048, num_leading_axes=1)
-#         reshape1 = lasagne.layers.reshape(full1, ([0], 128, 4, 4))
-#         print reshape1.output_shape
-#         encoder = lasagne.layers.dropout(encoder, p=0.5)
         channel_full1 = lasagne.layers.DenseLayer(encoder, 16, num_leading_axes=2)
         reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
         print reshape1.output_shape
-        deconv = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
+#         depool1 = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
+#         deconv1 = lasagne.layers.Deconv2DLayer(depool1, 384, (3, 3), crop='same')
 #         print deconv1.output_shape
-        deconv0 = lasagne.layers.Deconv2DLayer(deconv, 192, (3, 3), crop='same')
-        print deconv0.output_shape
-        deconv1 = lasagne.layers.Deconv2DLayer(deconv0, 192, (2, 2), stride=2)
-        print deconv1.output_shape
-        deconv2 = lasagne.layers.Deconv2DLayer(deconv1, 48, (3, 3), crop='same')
+        depool2 = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
+        deconv2 = lasagne.layers.Deconv2DLayer(depool2, 192, (3, 3), crop='same')
         print deconv2.output_shape
-        deconv3 = lasagne.layers.Deconv2DLayer(deconv2, 48, (2, 2), stride=2)
+        depool3 = lasagne.layers.Deconv2DLayer(deconv2, 192, (2, 2), stride=2)
+        deconv3 = lasagne.layers.Deconv2DLayer(depool3, 48, (3, 3), crop='same')
         print deconv3.output_shape
-        deconv4 = lasagne.layers.Deconv2DLayer(deconv3, 12, (3, 3), crop='same')
+        depool4 = lasagne.layers.Deconv2DLayer(deconv3, 48, (2, 2), stride=2)
+        deconv4 = lasagne.layers.Deconv2DLayer(depool4, 12, (3, 3), crop='same')
         print deconv4.output_shape
-        deconv5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
+        depool5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
+        deconv5 = lasagne.layers.Deconv2DLayer(depool5, 3, (3, 3), crop='same', 
+                                               nonlinearity=None)
         print deconv5.output_shape
-        deconv6 = lasagne.layers.Deconv2DLayer(deconv5, 3, (3, 3), crop='same', 
-                                               nonlinearity=lasagne.nonlinearities.sigmoid)
-        print deconv6.output_shape
-        output = lasagne.layers.dimshuffle(deconv6, [0,2,3,1])
+        output = lasagne.layers.dimshuffle(deconv5, [0,2,3,1])
         print output.output_shape
         
         return output
@@ -106,7 +102,7 @@ class Inpainting(object):
         return cost
     
     def Cost_l2(self, y_hat, y):
-        cost = tensor.sqrt(tensor.mean(tensor.sqr(y_hat - y), axis=[1,2,3])).mean()
+        cost = tensor.mean(tensor.sqr(y_hat - y))
         return cost
         
     def init_model(self):
@@ -118,11 +114,13 @@ class Inpainting(object):
         
         self.decoder = self.Decode(self.encoder)
         
-        self.y_hat = lasagne.layers.get_output(self.decoder) * 255.
+        self.y_hat = lasagne.layers.get_output(self.decoder)
         
         self.cost = self.Cost_l2(self.y_hat, self.y)
-        
         self.f_cost = theano.function([self.x, self.y], self.cost, name='cost function')
+        
+        self.test_cost = self.Cost_l2(self.y_hat[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
+        self.f_test_cost = theano.function([self.x, self.y], self.test_cost, name='cost function')
         
         self.trainable_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         
@@ -133,9 +131,23 @@ class Inpainting(object):
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
+    def show_examples(self):
+        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'))
+        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'))
+        original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
+                                   numpy.array(dataset.valid_y[:10], dtype='int64'))
+        
+        y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
+        generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
+        original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
+        
+        fig = numpy.int64(numpy.concatenate([original, generate, y_hat], axis=1))
+        fig = numpy.clip(fig, 0, 255).astype('uint8')
+        Image.fromarray(fig, mode='RGB').show()
+        
     def learn_model(self, dataset, 
                     batch_size=32, 
-                    valid_batch_size=64, 
+                    valid_batch_size=128, 
                     saveto='params/model', 
                     optimizer=lasagne.updates.adam,
                     patience=5, 
@@ -193,31 +205,17 @@ class Inpainting(object):
                     cost = self.f_update(x, y)
     
                     if numpy.isnan(cost) or numpy.isinf(cost):
-                        print('bad cost detected: ', cost)
+                        print 'bad cost detected: ', cost
                         return 1., 1., 1.
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
-                        print('Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost ', cost, 
-                              'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx)
+                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost ', cost, \
+                              'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
     
                     if numpy.mod(uidx, validFreq) == 0:
                         #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
-                        
-                        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'))
-                        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'))
-                        original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
-                                                   numpy.array(dataset.valid_y[:10], dtype='int64'))
-                        
-                        y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
-                        generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
-                        original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
-                        
-                        fig = numpy.int64(numpy.concatenate([original, generate, y_hat], axis=1))
-                        fig = numpy.clip(fig, 0, 255).astype('uint8')
-                        print fig.max(), fig.min()
-                        Image.fromarray(fig, mode='RGB').show()
+                        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
     
                         self.history_errs.append(valid_decode_err)
     
@@ -230,8 +228,10 @@ class Inpainting(object):
                             bad_counter = 0
                             
                             self.save_model(saveto)
+                            
+                            self.show_examples()
     
-                        print( ('Valid decode error:', valid_decode_err) )
+                        print 'Valid decode error:', valid_decode_err
     
                         if (len(self.history_errs) > patience and
                             valid_decode_err >= numpy.array(self.history_errs)[:-patience].min()):
@@ -241,13 +241,13 @@ class Inpainting(object):
                                 estop = True
                                 break
     
-                print('Seen %d samples' % n_samples)
+                print 'Seen %d samples' % n_samples
     
                 if estop:
                     break
     
         except KeyboardInterrupt:
-            print("Training interupted")
+            print "Training interupted"
     
         end_time = time.time()
         if self.best_p is not None:
@@ -257,14 +257,15 @@ class Inpainting(object):
     
         #kf_train_sorted = get_minibatches_idx(len(train), batch_size)
         #train_err = pred_error(f_sentiment, prepare_data, train, kf_train_sorted)
-        valid_decode_err = error(self.f_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
+        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
     
-        print('Valid decode error:', valid_decode_err)
+        print 'Valid decode error:', valid_decode_err
         if saveto:
             self.save_model(saveto)
-        print('The code run for %d epochs, with %f sec/epochs' % (
-            (eidx + 1), (end_time - start_time) / (1. * (eidx + 1))))
-        print('Training took %.1fs' % (end_time - start_time))
+        print 'The code run for %d epochs, with %f sec/epochs' % (
+            (eidx + 1), (end_time - start_time) / (1. * (eidx + 1)))
+        print 'Training took %.1fs' % (end_time - start_time)
+        self.show_examples()
         return valid_decode_err
         
         
