@@ -15,6 +15,7 @@ import PIL.Image as Image
 from Utils import *
 
 from DataLoader import Mscoco
+from Layers import Upsampling
 
 class Inpainting(object):
     '''
@@ -73,19 +74,16 @@ class Inpainting(object):
         channel_full1 = lasagne.layers.DenseLayer(encoder, 16, num_leading_axes=2)
         reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
         print reshape1.output_shape
-#         depool1 = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
-#         deconv1 = lasagne.layers.Deconv2DLayer(depool1, 384, (3, 3), crop='same')
-#         print deconv1.output_shape
-        depool2 = lasagne.layers.Deconv2DLayer(reshape1, 768, (2, 2), stride=2)
+        depool2 = Upsampling(reshape1, 2, num_input_channels=768)
         deconv2 = lasagne.layers.Deconv2DLayer(depool2, 192, (3, 3), crop='same')
         print deconv2.output_shape
-        depool3 = lasagne.layers.Deconv2DLayer(deconv2, 192, (2, 2), stride=2)
+        depool3 = Upsampling(deconv2, 2, num_input_channels=192)
         deconv3 = lasagne.layers.Deconv2DLayer(depool3, 48, (3, 3), crop='same')
         print deconv3.output_shape
-        depool4 = lasagne.layers.Deconv2DLayer(deconv3, 48, (2, 2), stride=2)
+        depool4 = Upsampling(deconv3, 2, num_input_channels=48)
         deconv4 = lasagne.layers.Deconv2DLayer(depool4, 12, (3, 3), crop='same')
         print deconv4.output_shape
-        depool5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
+        depool5 = Upsampling(deconv4, 2, num_input_channels=12)
         deconv5 = lasagne.layers.Deconv2DLayer(depool5, 3, (3, 3), crop='same', 
                                                nonlinearity=None)
         print deconv5.output_shape

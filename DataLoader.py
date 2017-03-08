@@ -61,6 +61,6 @@ class Mscoco(object):
         
     def prepare_data(self, x, y):
         x = numpy.array(x, dtype='float32')
-        x = x * (1 - self.mask) + rng.randint(0, 256, x.shape) * self.mask
+#         x = x * (1 - self.mask) + rng.randint(0, 256, x.shape) * self.mask
         return x.astype('float32'), numpy.array(y, dtype='int64')
                 
