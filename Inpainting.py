@@ -51,18 +51,22 @@ class Inpainting(object):
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         conv1 = lasagne.layers.Conv2DLayer(dimshuffle1, 12, (3,3), pad='same')
 #         print conv1.output_shape
-        pool1 = lasagne.layers.Pool2DLayer(conv1, (2,2))
+#         pool1 = lasagne.layers.Pool2DLayer(conv1, (2,2))
+        pool1 = lasagne.layers.Conv2DLayer(conv1, 12, (2,2), stride=2)
         print pool1.output_shape
         conv2 = lasagne.layers.Conv2DLayer(pool1, 48, (3,3), pad='same')
 #         print conv2.output_shape
-        pool2 = lasagne.layers.Pool2DLayer(conv2, (2,2))
+#         pool2 = lasagne.layers.Pool2DLayer(conv2, (2,2))
+        pool2 = lasagne.layers.Conv2DLayer(conv2, 48, (2,2), stride=2)
         print pool2.output_shape
         conv3 = lasagne.layers.Conv2DLayer(pool2, 192, (3,3), pad='same')
 #         print conv3.output_shape
-        pool3 = lasagne.layers.Pool2DLayer(conv3, (2,2))
+#         pool3 = lasagne.layers.Pool2DLayer(conv3, (2,2))
+        pool3 = lasagne.layers.Conv2DLayer(conv3, 192, (2,2), stride=2)
         print pool3.output_shape
         conv4 = lasagne.layers.Conv2DLayer(pool3, 768, (3,3), pad='same')
-        pool4 = lasagne.layers.Pool2DLayer(conv4, (2,2))
+#         pool4 = lasagne.layers.Pool2DLayer(conv4, (2,2))
+        pool4 = lasagne.layers.Conv2DLayer(conv4, 768, (2,2), stride=2)
         print pool4.output_shape
 #         conv5 = lasagne.layers.Conv2DLayer(pool4, 768, (3,3), pad='same')
 #         pool5 = lasagne.layers.Pool2DLayer(conv5, (2,2))
@@ -89,7 +93,8 @@ class Inpainting(object):
                                                )
         print deconv5.output_shape
         draft = lasagne.layers.dimshuffle(deconv5, [0,2,3,1])
-        output = pixelConvLayer(draft, 3, 3, num_layers=3)
+#         output = pixelConvLayer(draft, 3, 3, num_layers=3)
+        output = draft
         print output.output_shape
         
         return output
