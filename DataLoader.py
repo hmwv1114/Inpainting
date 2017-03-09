@@ -22,8 +22,8 @@ class Mscoco(object):
         Constructor
         '''
         self.path = path
-        self.mask = numpy.zeros((64, 64, 3), dtype='uint8')
-        self.mask[16:48, 16:48, :] = 1
+        self.mask = numpy.zeros((64, 64), dtype='int64')
+        self.mask[16:48, 16:48] = 1
         
         self.wdict = cPickle.load(open(path + 'worddict.pkl', 'rb'))
         captions = cPickle.load(open(path + 'dict_key_imgID_value_caps_train_and_valid.pkl', 'rb'))
@@ -42,7 +42,7 @@ class Mscoco(object):
 #                     print img.shape
                     continue
                 
-                x.append(img * (1 - self.mask))
+                x.append(img * (1 - self.mask[:,:,None]))
 #                 y.append(img[self.mask > 0].reshape((32,32,3)))
                 y.append(img)
                 c.append(captions[imgfile[:-4]])
@@ -50,7 +50,7 @@ class Mscoco(object):
                 n += 1
                 if n % 10000 == 0:
                     print n
-#                     break
+                    break
                 
             return x, y, c
                 

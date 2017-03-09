@@ -46,27 +46,44 @@ class Inpainting(object):
         self.load_params(saveto)
         print('Done')
         
-    def Encode(self, x):
+    def Encode(self, x, mask):
         input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x/255.)
+        mask_layer = lasagne.layers.InputLayer((None,None,64,64), mask[None,None,:,:])
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
+        
         conv1 = lasagne.layers.Conv2DLayer(dimshuffle1, 12, (3,3), pad='same')
 #         print conv1.output_shape
 #         pool1 = lasagne.layers.Pool2DLayer(conv1, (2,2))
         pool1 = lasagne.layers.Conv2DLayer(conv1, 12, (2,2), stride=2)
+        if mask != None:
+            maskpool1 = lasagne.layers.Pool2DLayer(mask_layer, (2,2))
+            pool1 = lasagne.layers.ElemwiseMergeLayer([pool1, maskpool1], tensor.mul)
         print pool1.output_shape
+        
         conv2 = lasagne.layers.Conv2DLayer(pool1, 48, (3,3), pad='same')
 #         print conv2.output_shape
 #         pool2 = lasagne.layers.Pool2DLayer(conv2, (2,2))
         pool2 = lasagne.layers.Conv2DLayer(conv2, 48, (2,2), stride=2)
+        if mask != None:
+            maskpool2 = lasagne.layers.Pool2DLayer(maskpool1, (2,2))
+            pool2 = lasagne.layers.ElemwiseMergeLayer([pool2, maskpool2], tensor.mul)
         print pool2.output_shape
+        
         conv3 = lasagne.layers.Conv2DLayer(pool2, 192, (3,3), pad='same')
 #         print conv3.output_shape
 #         pool3 = lasagne.layers.Pool2DLayer(conv3, (2,2))
         pool3 = lasagne.layers.Conv2DLayer(conv3, 192, (2,2), stride=2)
+        if mask != None:
+            maskpool3 = lasagne.layers.Pool2DLayer(maskpool2, (2,2))
+            pool3 = lasagne.layers.ElemwiseMergeLayer([pool3, maskpool3], tensor.mul)
         print pool3.output_shape
+        
         conv4 = lasagne.layers.Conv2DLayer(pool3, 768, (3,3), pad='same')
 #         pool4 = lasagne.layers.Pool2DLayer(conv4, (2,2))
         pool4 = lasagne.layers.Conv2DLayer(conv4, 768, (2,2), stride=2)
+        if mask != None:
+            maskpool4 = lasagne.layers.Pool2DLayer(maskpool3, (2,2))
+            pool4 = lasagne.layers.ElemwiseMergeLayer([pool4, maskpool4], tensor.mul)
         print pool4.output_shape
 #         conv5 = lasagne.layers.Conv2DLayer(pool4, 768, (3,3), pad='same')
 #         pool5 = lasagne.layers.Pool2DLayer(conv5, (2,2))
@@ -89,7 +106,7 @@ class Inpainting(object):
         print deconv4.output_shape
         depool5 = lasagne.layers.Deconv2DLayer(deconv4, 12, (2, 2), stride=2)
         deconv5 = lasagne.layers.Deconv2DLayer(depool5, 3, (3, 3), crop='same', 
-#                                                nonlinearity=None
+                                               nonlinearity=None
                                                )
         print deconv5.output_shape
         draft = lasagne.layers.dimshuffle(deconv5, [0,2,3,1])
@@ -114,31 +131,32 @@ class Inpainting(object):
         print 'Initialing model'
         self.x = tensor.tensor4(name='x', dtype='float32')
         self.y = tensor.tensor4(name='y', dtype='int64')
+        self.mask = tensor.matrix(name='mask', dtype='int64')
         
-        self.encoder = self.Encode(self.x)
+        self.encoder = self.Encode(self.x, self.mask)
         
         self.decoder = self.Decode(self.encoder)
         
         self.y_hat = lasagne.layers.get_output(self.decoder)
         
         self.cost = self.Cost_l2(self.y_hat, self.y)
-        self.f_cost = theano.function([self.x, self.y], self.cost, name='cost function')
+        self.f_cost = theano.function([self.x, self.y, self.mask], self.cost, name='cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
-        self.f_test_cost = theano.function([self.x, self.y], self.test_cost, name='cost function')
+        self.f_test_cost = theano.function([self.x, self.y, self.mask], self.test_cost, name='cost function')
         
         self.trainable_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         
         self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat[:, 16:48, 16:48])
         self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48].astype('float32'))
-        self.f_yhat = theano.function([self.x], self.y_hat, name='yhat')
-        self.f_generate = theano.function([self.x], self.generate, name='Generate')
+        self.f_yhat = theano.function([self.x, self.mask], self.y_hat, name='yhat')
+        self.f_generate = theano.function([self.x, self.mask], self.generate, name='Generate')
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
     def show_examples(self):
-        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'))
-        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'))
+        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
+        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
         original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
                                    numpy.array(dataset.valid_y[:10], dtype='int64'))
         
@@ -166,7 +184,7 @@ class Inpainting(object):
             updates = optimizer(self.cost, self.trainable_params)
         else:
             updates = optimizer(self.cost, self.trainable_params, lrate)
-        self.f_update = theano.function([self.x, self.y], self.cost, updates=updates)
+        self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
             
         print('Optimization')
         kf_valid = get_minibatches_idx(len(dataset.valid_x), valid_batch_size)
@@ -207,7 +225,7 @@ class Inpainting(object):
                     x, y = dataset.prepare_data(x, y)
                     n_samples += x.shape[0]
     
-                    cost = self.f_update(x, y)
+                    cost = self.f_update(x, y, dataset.mask)
     
                     if numpy.isnan(cost) or numpy.isinf(cost):
                         print 'bad cost detected: ', cost
@@ -220,7 +238,7 @@ class Inpainting(object):
     
                     if numpy.mod(uidx, validFreq) == 0:
                         #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
+                        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
     
                         self.history_errs.append(valid_decode_err)
     
@@ -262,7 +280,7 @@ class Inpainting(object):
     
         #kf_train_sorted = get_minibatches_idx(len(train), batch_size)
         #train_err = pred_error(f_sentiment, prepare_data, train, kf_train_sorted)
-        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, kf_valid)
+        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
     
         print 'Valid decode error:', valid_decode_err
         if saveto:
