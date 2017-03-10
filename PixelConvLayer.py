@@ -14,7 +14,6 @@ def floatX(num):
         raise Exception("{} type not supported".format(theano.config.floatX))
 
 srng = RandomStreams(seed=3732)
-T.nnet.relu = lambda x: T.switch(x > floatX(0.), x, floatX(0.00001)*x) #this helps avoid Nan
 
 
 def uniform(stdev, size):
