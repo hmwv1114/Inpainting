@@ -101,7 +101,6 @@ class Inpainting(object):
         layer4 = decode_layer(layer3, 64, 3, nonlinearity=lasagne.nonlinearities.tanh, ksize=(3,3))
         
         draft = lasagne.layers.dimshuffle(layer4, [0,2,3,1])
-#         output = pixelConvLayer(draft, 3, 3, num_layers=3)
         output = draft
         print output.output_shape
         
@@ -113,7 +112,6 @@ class Inpainting(object):
         input_True_layer = lasagne.layers.InputLayer((None, 64, 64, 3), T)
         input_Fake_layer = lasagne.layers.InputLayer((None, 64, 64, 3), F)
         input_layer = ChooseLayer([input_True_layer, input_Fake_layer])
-#         mask_layer = lasagne.layers.InputLayer((None,None,64,64), mask[None,None,:,:])
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         
         def Discriminate_layer(input, num_units, ksize=(3,3)):
@@ -132,7 +130,7 @@ class Inpainting(object):
         
 #         dense1 = lasagne.layers.DenseLayer(layer4, 1024, num_leading_axes=1)
         output = lasagne.layers.DenseLayer(layer5, 1, num_leading_axes=1,
-                                           nonlinearity=lasagne.nonlinearities.sigmoid)
+                                           nonlinearity=None)
         
         return output
     
@@ -150,7 +148,7 @@ class Inpainting(object):
     def init_model(self):
         print 'Initialing model'
         self.x = tensor.tensor4(name='x', dtype='float32')
-        self.y = tensor.tensor4(name='y', dtype='int64')
+        self.y = tensor.tensor4(name='y', dtype='float32')
         self.mask = tensor.matrix(name='mask', dtype='float32')
         
         self.encoder = self.Encode(self.x, self.mask)
@@ -162,16 +160,16 @@ class Inpainting(object):
         self.f_cost = theano.function([self.x, self.y, self.mask], self.cost, name='Reconstruction cost function')
         
         self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat[:, 16:48, 16:48])
-        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48].astype('float32'))
+        self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
         
-        self.disciminator = self.Discriminate(T=self.original, F=self.generate)
+        self.disciminator = self.Discriminate(T=self.y, F=self.generate)
         true_score = lasagne.layers.get_output(self.disciminator, chs_idx=0)
         fake_score = lasagne.layers.get_output(self.disciminator, chs_idx=1)
         
-        self.cost_Dsc = -(tensor.log(true_score) + tensor.log(1. - fake_score)).mean() 
+        self.cost_Dsc = -(true_score - fake_score).mean() 
         self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='GAN cost function')
         
-        self.cost_Gen = tensor.log(1. - fake_score).mean()
+        self.cost_Gen = - fake_score.mean()
         self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, name='Generative cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
@@ -189,7 +187,7 @@ class Inpainting(object):
         y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
         generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
         original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
-                                   numpy.array(dataset.valid_y[:10], dtype='int64'))
+                                   numpy.array(dataset.valid_y[:10], dtype='float32'))
         
         y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
         generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
@@ -324,23 +322,24 @@ class Inpainting(object):
                     batch_size=64, 
                     valid_batch_size=128, 
                     saveto='params/model', 
-                    optimizer=lasagne.updates.adam,
+                    optimizer=lasagne.updates.rmsprop,
                     patience=5, 
-                    lrate=0.0002, 
+                    lrate=0.00005, 
                     dispFreq=100, 
                     validFreq=-1, 
                     saveFreq=-1, 
                     max_epochs=40,
                     n_critic=5,
+                    clip_params=0.01,
                     ):
         print 'Computing gradient...'
-#         updates = optimizer(self.cost, self.trainable_params, lrate)
+#         updates = optimizer(self.cost, self.generator_params, lrate)
 #         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
-        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate, beta1=0.5)
+        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate)
         self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
         
-        updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate, beta1=0.5)
+        updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate)
         self.f_update_Gen = theano.function([self.x, self.mask], self.cost_Gen, updates=updates_Gen)
             
         print('Optimization')
@@ -375,11 +374,15 @@ class Inpainting(object):
                     for i in range(n_critic):
                         random_idx = rng.randint(len(kf))
                         _, train_index_sample = kf[random_idx]
+                        x = [dataset.train_x[t]for t in train_index_sample]
                         
-                        # Select the random examples for this minibatch
-                        x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
-                             for t in train_index_sample]
+                        random_idx = rng.randint(len(kf))
+                        _, train_index_sample = kf[random_idx]
                         y = [dataset.train_y[t]for t in train_index_sample]
+                        
+                        if len(x) != batch_size or len(y) != batch_size:
+                            print 'unmatched sample'
+                            continue
         
                         # Get the data in numpy.ndarray format
                         # This swap the axis!
@@ -391,6 +394,11 @@ class Inpainting(object):
                         if numpy.isnan(cost_Dsc) or numpy.isinf(cost_Dsc):
                             print 'bad cost detected: ', cost_Dsc
                             return 1., 1., 1.
+                        
+                        for p in self.discriminator_params:
+                            pv = p.get_value()
+                            pv = numpy.clip(pv, -clip_params, clip_params)
+                            p.set_value(pv)
     
                     # Select the random examples for this minibatch
                     x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
