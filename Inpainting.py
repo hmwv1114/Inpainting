@@ -86,10 +86,12 @@ class Inpainting(object):
         reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
         print reshape1.output_shape
         
-        def decode_layer(input, input_units, output_units, nonlinearity=lasagne.nonlinearities.rectify, ksize=(3,3)):
+        def decode_layer(input, input_units, output_units, 
+                         nonlinearity=lasagne.nonlinearities.rectify, ksize=(3,3), depool=True):
             input = lasagne.layers.BatchNormLayer(input)
-            depool = lasagne.layers.Deconv2DLayer(input, input_units, (2, 2), stride=2)
-            deconv = lasagne.layers.Deconv2DLayer(depool, output_units, ksize, crop='same', 
+            if depool:
+                input = lasagne.layers.Deconv2DLayer(input, input_units, (2, 2), stride=2)
+            deconv = lasagne.layers.Deconv2DLayer(input, output_units, ksize, crop='same', 
                                                   nonlinearity=nonlinearity)
             print deconv.output_shape
             return deconv
@@ -98,7 +100,7 @@ class Inpainting(object):
         layer1 = decode_layer(reshape1, 512, 256)
         layer2 = decode_layer(layer1, 256, 128)
         layer3 = decode_layer(layer2, 128, 64)
-        layer4 = decode_layer(layer3, 64, 3, nonlinearity=lasagne.nonlinearities.tanh, ksize=(3,3))
+        layer4 = decode_layer(layer3, 64, 3, nonlinearity=lasagne.nonlinearities.tanh, depool=False)
         
         draft = lasagne.layers.dimshuffle(layer4, [0,2,3,1])
         output = draft
@@ -159,7 +161,7 @@ class Inpainting(object):
         self.cost = self.Cost_l2(self.y_hat, self.y)
         self.f_cost = theano.function([self.x, self.y, self.mask], self.cost, name='Reconstruction cost function')
         
-        self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat[:, 16:48, 16:48])
+        self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat)
         self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
         
         self.disciminator = self.Discriminate(T=self.y, F=self.generate)
@@ -172,7 +174,7 @@ class Inpainting(object):
         self.cost_Gen = - fake_score.mean()
         self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, name='Generative cost function')
         
-        self.test_cost = self.Cost_l2(self.y_hat[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
+        self.test_cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
         self.f_test_cost = theano.function([self.x, self.y, self.mask], self.test_cost, name='cost function')
         
         self.generator_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
@@ -193,7 +195,7 @@ class Inpainting(object):
         generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
         original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
         
-        fig = numpy.int64(numpy.concatenate([original, generate, y_hat], axis=1))
+        fig = numpy.int64(numpy.concatenate([original, generate], axis=1))
         fig = numpy.clip(fig, 0, 255).astype('uint8')
         Image.fromarray(fig, mode='RGB').show()
         
@@ -336,7 +338,7 @@ class Inpainting(object):
 #         updates = optimizer(self.cost, self.generator_params, lrate)
 #         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
-        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate)
+        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate=0.001)
         self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
         
         updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate)
@@ -480,6 +482,6 @@ class Inpainting(object):
 dataset = Mscoco('D:/workspace/Data/inpainting/')
 model = Inpainting()
 # model.learn_model(dataset, saveto='params/model.npz')
-model.load_model(saveto='params/model.npz')
-model.show_examples(dataset)
+# model.load_model(saveto='params/model.npz')
+# model.show_examples(dataset)
 model.learn_model_GAN(dataset, saveto='params/model_GAN.npz')
