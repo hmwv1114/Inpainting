@@ -326,7 +326,7 @@ class Inpainting(object):
                     saveto='params/model', 
                     optimizer=lasagne.updates.rmsprop,
                     patience=5, 
-                    lrate=0.00005, 
+                    lrate=0.01, 
                     dispFreq=100, 
                     validFreq=-1, 
                     saveFreq=-1, 
@@ -338,7 +338,7 @@ class Inpainting(object):
 #         updates = optimizer(self.cost, self.generator_params, lrate)
 #         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
-        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate=0.001)
+        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate)
         self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
         
         updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate)
@@ -413,15 +413,15 @@ class Inpainting(object):
                     x, y = dataset.prepare_data(x, y)
                     n_samples += x.shape[0]
     
-                    cost_Gen = self.f_update_Gen(x, dataset.mask)
+#                     cost_Gen = self.f_update_Gen(x, dataset.mask)
     
-                    if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
-                        print 'bad cost detected: ', cost_Gen
-                        return 1., 1., 1.
+#                     if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
+#                         print 'bad cost detected: ', cost_Gen
+#                         return 1., 1., 1.
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
-                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, \
+                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Dsc', cost_Dsc, \
                               'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
     
                     if numpy.mod(uidx, validFreq) == 0:
