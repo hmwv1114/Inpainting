@@ -112,14 +112,14 @@ class Inpainting(object):
     def Discriminate(self, T, F):
         print 'Initialling discriminator...'
         
-        input_True_layer = lasagne.layers.InputLayer((None, 64, 64, 3), T)
-        input_Fake_layer = lasagne.layers.InputLayer((None, 64, 64, 3), F)
+        input_True_layer = lasagne.layers.InputLayer((None, 64, 64, 3), T / 255.)
+        input_Fake_layer = lasagne.layers.InputLayer((None, 64, 64, 3), F / 255.)
         input_layer = ChooseLayer([input_True_layer, input_Fake_layer])
         dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         
         def Discriminate_layer(input, num_units, ksize=(3,3), pooling=True):
-#             input = lasagne.layers.BatchNormLayer(input)
             conv = lasagne.layers.Conv2DLayer(input, num_units, ksize, pad='same', nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
+            conv = lasagne.layers.BatchNormLayer(conv)
             if pooling:
                 conv = lasagne.layers.Conv2DLayer(conv, num_units, (2,2), stride=2, nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
             print conv.output_shape
@@ -426,7 +426,7 @@ class Inpainting(object):
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
-                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Dsc', cost_Dsc, \
+                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, \
                               'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
     
                     if numpy.mod(uidx, validFreq) == 0:
