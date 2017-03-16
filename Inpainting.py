@@ -417,17 +417,16 @@ class Inpainting(object):
                     # Return something of shape (minibatch maxlen, n samples)
                     x, y = dataset.prepare_data(x, y)
                     n_samples += x.shape[0]
-     
+                    
                     cost_Gen = self.f_update_Gen(x, dataset.mask)
-#                     cost_Gen = 0.
     
-                    if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
-                        print 'bad cost detected: ', cost_Gen
-                        return 1., 1., 1.
+#                     if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
+#                         print 'bad cost detected: ', cost_Gen
+#                         return 1., 1., 1.
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
-                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, \
+                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Dsc', cost_Dsc, \
                               'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
     
                     if numpy.mod(uidx, validFreq) == 0:
