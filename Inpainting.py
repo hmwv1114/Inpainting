@@ -349,7 +349,7 @@ class Inpainting(object):
                     clip_params=0.01,
                     ):
         print 'Computing gradient...'
-        updates = optimizer(self.cost, self.generator_params, lrate)
+        updates = optimizer(self.cost, self.generator_params, lrate*10)
         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
         updates_Dsc = optimizer(-self.cost_Dsc, self.discriminator_params, lrate)
@@ -434,7 +434,7 @@ class Inpainting(object):
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
-                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, \
+                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, 'Cost L2', cost, \
                               'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
     
                     if numpy.mod(uidx, validFreq) == 0:
