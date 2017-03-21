@@ -54,87 +54,96 @@ class Inpainting(object):
         print 'Initialling encoder...'
         
         input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x)
-        dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
-        dimshuffle1 = lasagne.layers.BatchNormLayer(dimshuffle1)
+        layer = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
+        layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
         
         def encoder_layer(input, mask, num_units, ksize=(3,3), pooling=True):
-            input = lasagne.layers.BatchNormLayer(input)
             conv = lasagne.layers.Conv2DLayer(input, num_units, ksize, pad='same')
+            conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
             if pooling:
                 conv = lasagne.layers.Conv2DLayer(conv, num_units, (2,2), stride=2)
-            maskpool = tensor.signal.pool.pool_2d(mask, (2,2), ignore_border=True)
-            output = ApplyMask(conv, mask=maskpool)
+                conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
+                mask = tensor.signal.pool.pool_2d(mask, (2,2), ignore_border=True)
+            output = ApplyMask(conv, mask=mask)
             print output.output_shape
             
-            return output, maskpool
+            return output, mask
         
-        layer1, mask1 = encoder_layer(dimshuffle1, mask, num_units=64, ksize=(3,3)) #32*32
-        layer2, mask2 = encoder_layer(layer1, mask1, num_units=128) #16*16
-        layer3, mask3 = encoder_layer(layer2, mask2, num_units=256) #8*8
-        layer4, mask4 = encoder_layer(layer3, mask3, num_units=512) #4*4
+        layer, mask = encoder_layer(layer, mask, num_units=64, ksize=(3,3), pooling=True) #32*32
+        layer, mask = encoder_layer(layer, mask, num_units=128) #16*16
+        layer, mask = encoder_layer(layer, mask, num_units=256) #8*8
+#         layer, mask = encoder_layer(layer, mask, num_units=512) #4*4
 #         layer5, mask5 = encoder_layer(layer4, mask4, num_units=1024) #2*2
         
 #         conv5 = lasagne.layers.Conv2DLayer(pool4, 768, (3,3), pad='same')
 #         pool5 = lasagne.layers.Pool2DLayer(conv5, (2,2))
 #         print pool5.output_shape
         
-        return layer4
+        return layer
     
     def Decode(self, encoder):
         print 'Initialling decoder...'
         
-        channel_full1 = lasagne.layers.DenseLayer(encoder, 16, num_leading_axes=2)
-        reshape1 = lasagne.layers.reshape(channel_full1, ([0], [1], 4, 4))
-        print reshape1.output_shape
+        layer = lasagne.layers.DenseLayer(encoder, 64, num_leading_axes=2)
+        layer = lasagne.layers.reshape(layer, ([0], [1], 8, 8))
+        layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
+        print layer.output_shape
         
         def decode_layer(input, input_units, output_units, 
-                         nonlinearity=lasagne.nonlinearities.rectify, ksize=(3,3), depool=True):
-            input = lasagne.layers.BatchNormLayer(input)
+                         nonlinearity=lasagne.nonlinearities.rectify, 
+                         ksize=(3,3), depool=True):
             if depool:
                 input = lasagne.layers.Deconv2DLayer(input, input_units, (2, 2), stride=2)
+                input = lasagne.layers.BatchNormLayer(input, beta=None, gamma=None)
+                
             deconv = lasagne.layers.Deconv2DLayer(input, output_units, ksize, crop='same', 
                                                   nonlinearity=nonlinearity)
+            if output_units != 3:
+                deconv = lasagne.layers.BatchNormLayer(deconv, beta=None, gamma=None)
+            
             print deconv.output_shape
             return deconv
         
 #         layer0 = decode_layer(reshape1, 1024, 512)
-        layer1 = decode_layer(reshape1, 512, 256)
-        layer2 = decode_layer(layer1, 256, 128)
-        layer3 = decode_layer(layer2, 128, 64)
-        layer4 = decode_layer(layer3, 64, 3, nonlinearity=lasagne.nonlinearities.tanh, depool=False)
+#         layer = decode_layer(layer, 512, 256)
+        layer = decode_layer(layer, 256, 128)
+        layer = decode_layer(layer, 128, 64)
+        layer = decode_layer(layer, 64, 3, nonlinearity=lasagne.nonlinearities.tanh, depool=False)
         
-        draft = lasagne.layers.dimshuffle(layer4, [0,2,3,1])
+        draft = lasagne.layers.dimshuffle(layer, [0,2,3,1])
         output = draft
         print output.output_shape
         
         return output
     
-    def Discriminate(self, T, F):
+    def Discriminate(self, input):
         print 'Initialling discriminator...'
         
-        input_True_layer = lasagne.layers.InputLayer((None, 64, 64, 3), T / 255.)
-        input_Fake_layer = lasagne.layers.InputLayer((None, 64, 64, 3), F / 255.)
-        input_layer = ChooseLayer([input_True_layer, input_Fake_layer])
-        dimshuffle1 = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
+        input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), input)
+        layer = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         
         def Discriminate_layer(input, num_units, ksize=(3,3), pooling=True):
             conv = lasagne.layers.Conv2DLayer(input, num_units, ksize, pad='same', nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
-            conv = lasagne.layers.BatchNormLayer(conv)
+            conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
             if pooling:
                 conv = lasagne.layers.Conv2DLayer(conv, num_units, (2,2), stride=2, nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
+                conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
             print conv.output_shape
             
             return conv
         
-        layer1 = Discriminate_layer(dimshuffle1, num_units=32) #32*32
-        layer2 = Discriminate_layer(layer1, num_units=64) #16*16
-        layer3 = Discriminate_layer(layer2, num_units=128) #8*8
-        layer4 = Discriminate_layer(layer3, num_units=128, pooling=False) #4*4
+        layer = Discriminate_layer(layer, num_units=32) #32*32
+        layer = Discriminate_layer(layer, num_units=64) #16*16
+        layer = Discriminate_layer(layer, num_units=128) #8*8
+        layer = Discriminate_layer(layer, num_units=256) #4*4
 #         layer5 = Discriminate_layer(layer4, num_units=256) #2*2
         
-#         dense1 = lasagne.layers.DenseLayer(layer4, 1024, num_leading_axes=1)
-        output = lasagne.layers.DenseLayer(layer4, 1, num_leading_axes=1,
-                                           nonlinearity=None)
+#         layer = lasagne.layers.DenseLayer(layer, 1024, num_leading_axes=1, 
+#                                           nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
+#         layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
+#         print layer.output_shape
+        output = lasagne.layers.DenseLayer(layer, 1, num_leading_axes=1,
+                                           nonlinearity=None, b=None)
         
         return output
     
@@ -159,22 +168,22 @@ class Inpainting(object):
         
         self.decoder = self.Decode(self.encoder)
         
-        self.y_hat = (lasagne.layers.get_output(self.decoder) + 1.) / 2. * 255.
-        self.cost = self.Cost_l2(self.y_hat, self.y)
+        self.y_hat = lasagne.layers.get_output(self.decoder)
+        self.cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
         self.f_cost = theano.function([self.x, self.y, self.mask], self.cost, name='Reconstruction cost function')
         
         self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat)
         self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
         
-        self.disciminator = self.Discriminate(T=self.y, F=self.generate)
+        self.disciminator = self.Discriminate(self.y)
         print self.disciminator.output_shape
-        true_score = lasagne.layers.get_output(self.disciminator, chs_idx=0)
-        fake_score = lasagne.layers.get_output(self.disciminator, chs_idx=1)
+        real_soore = lasagne.layers.get_output(self.disciminator)
+        fake_score = lasagne.layers.get_output(self.disciminator, self.generate)
         
-        self.cost_Dsc = -(true_score - fake_score).mean() 
+        self.cost_Dsc = (real_soore - fake_score).mean() 
         self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='Discriminative cost function')
         
-        self.cost_Gen = - fake_score.mean()
+        self.cost_Gen = fake_score.mean()
         self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, name='Generative cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
@@ -191,16 +200,16 @@ class Inpainting(object):
         print 'Done initial'
         
     def show_examples(self, dataset):
-        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
-        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32'), dataset.mask)
-        original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32'), 
-                                   numpy.array(dataset.valid_y[:10], dtype='float32'))
+        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
+        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
+        original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., 
+                                   numpy.array(dataset.valid_y[:10], dtype='float32') / 255. * 2. - 1.)
         
         y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
         generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
         original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
         
-        fig = numpy.int64(numpy.concatenate([original, generate], axis=1))
+        fig = numpy.int64((numpy.concatenate([original, generate], axis=1) + 1.) / 2. * 255.) 
         fig = numpy.clip(fig, 0, 255).astype('uint8')
         Image.fromarray(fig, mode='RGB').show()
         
@@ -340,13 +349,15 @@ class Inpainting(object):
                     clip_params=0.01,
                     ):
         print 'Computing gradient...'
-#         updates = optimizer(self.cost, self.generator_params, lrate)
-#         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
+        updates = optimizer(self.cost, self.generator_params, lrate)
+        self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
-        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, learning_rate=lrate)
+        updates_Dsc = optimizer(-self.cost_Dsc, self.discriminator_params, lrate)
+        for param in lasagne.layers.get_all_params(self.disciminator, trainable=True, regularizable=True):
+            updates_Dsc[param] = tensor.clip(updates_Dsc[param], -clip_params, clip_params)
         self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
         
-        updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate)
+        updates_Gen = optimizer(-self.cost_Gen, self.generator_params, lrate)
         self.f_update_Gen = theano.function([self.x, self.mask], self.cost_Gen, updates=updates_Gen)
             
         print('Optimization')
@@ -401,28 +412,25 @@ class Inpainting(object):
                         if numpy.isnan(cost_Dsc) or numpy.isinf(cost_Dsc):
                             print 'bad cost detected: ', cost_Dsc
                             return 1., 1., 1.
-                        
-                        for p in self.discriminator_params:
-                            pv = p.get_value()
-                            pv = numpy.clip(pv, -clip_params, clip_params)
-                            p.set_value(pv)
     
                     # Select the random examples for this minibatch
                     x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
                          for t in train_index]
                     y = [dataset.train_y[t]for t in train_index]
-    
+     
                     # Get the data in numpy.ndarray format
                     # This swap the axis!
                     # Return something of shape (minibatch maxlen, n samples)
                     x, y = dataset.prepare_data(x, y)
                     n_samples += x.shape[0]
-                    
+                     
                     cost_Gen = self.f_update_Gen(x, dataset.mask)
     
-#                     if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
-#                         print 'bad cost detected: ', cost_Gen
-#                         return 1., 1., 1.
+                    if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
+                        print 'bad cost detected: ', cost_Gen
+                        return 1., 1., 1.
+
+                    cost = self.f_update(x, y ,dataset.mask)
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
@@ -431,7 +439,7 @@ class Inpainting(object):
     
                     if numpy.mod(uidx, validFreq) == 0:
                         #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
+                        valid_decode_err = error(self.f_cost_Dsc, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
     
                         self.history_errs.append(valid_decode_err)
     
