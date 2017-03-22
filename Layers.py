@@ -7,6 +7,7 @@ import theano.tensor as tensor
 import lasagne
 from lasagne import init, nonlinearities
 
+
 class Upsampling(lasagne.layers.Layer):
     
     def __init__(self, incoming, ratio, num_input_channels=None, **kwargs):
@@ -32,6 +33,16 @@ class ApplyMask(lasagne.layers.Layer):
 
     def get_output_for(self, input, **kwargs):
         return input * self.mask[None, None, :, :]
+    
+class ApplyNoise(lasagne.layers.Layer):
+    
+    def __init__(self, incoming, mask, **kwargs):
+        super(ApplyNoise, self).__init__(incoming, **kwargs)
+        self.mask = mask
+        self.rng = tensor.shared_randomstreams.RandomStreams(seed=132468)
+
+    def get_output_for(self, input, **kwargs):
+        return input * self.mask[None, None, :, :] + self.rng.normal(input.shape) * (1. - self.mask[None, None, :, :])
     
 class ChooseLayer(lasagne.layers.MergeLayer):
     
