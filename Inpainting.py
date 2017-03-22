@@ -177,7 +177,7 @@ class Inpainting(object):
         fake_score = lasagne.layers.get_output(self.disciminator, self.generate)
         
 #         self.cost_Dsc = (real_soore - fake_score).mean()
-        self.cost_Dsc = (lasagne.objectives.binary_crossentropy(real_soore, 1) + lasagne.objectives.binary_crossentropy(fake_score, 0)).mean()
+        self.cost_Dsc = (lasagne.objectives.binary_crossentropy(real_score, 1) + lasagne.objectives.binary_crossentropy(fake_score, 0)).mean()
         self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='Discriminative cost function')
         
 #         self.cost_Gen = fake_score.mean()
@@ -197,7 +197,7 @@ class Inpainting(object):
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
-    def show_examples(self, dataset):
+    def show_examples(self, dataset, figname='example'):
         y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
         generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
         original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., 
@@ -210,6 +210,7 @@ class Inpainting(object):
         fig = numpy.int64((numpy.concatenate([original, generate], axis=1) + 1.) / 2. * 255.) 
         fig = numpy.clip(fig, 0, 255).astype('uint8')
         Image.fromarray(fig, mode='RGB').show()
+        Image.fromarray(fig, mode='RGB').save(figname, format='png')
         
     def learn_model(self, dataset, 
                     batch_size=32, 
@@ -452,7 +453,7 @@ class Inpainting(object):
                             
                             self.save_model(saveto)
                             
-                        self.show_examples(dataset)
+                        self.show_examples(dataset, 'GAN_epoch' + str(eidx))
     
                         print 'Valid decode error:', valid_decode_err
     
