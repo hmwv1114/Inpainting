@@ -16,7 +16,7 @@ from Utils import *
 
 from DataLoader import Mscoco
 from PixelConvLayer import pixelConvLayer
-from Layers import ApplyMask, ChooseLayer
+from Layers import ApplyMask, ChooseLayer, ApplyNoise
 
 rng = numpy.random.RandomState(seed=123456)
 
@@ -73,11 +73,7 @@ class Inpainting(object):
         layer, mask = encoder_layer(layer, mask, num_units=128) #16*16
         layer, mask = encoder_layer(layer, mask, num_units=256) #8*8
 #         layer, mask = encoder_layer(layer, mask, num_units=512) #4*4
-#         layer5, mask5 = encoder_layer(layer4, mask4, num_units=1024) #2*2
-        
-#         conv5 = lasagne.layers.Conv2DLayer(pool4, 768, (3,3), pad='same')
-#         pool5 = lasagne.layers.Pool2DLayer(conv5, (2,2))
-#         print pool5.output_shape
+        layer = ApplyNoise(layer, mask)
         
         return layer
     
@@ -143,7 +139,7 @@ class Inpainting(object):
 #         layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
 #         print layer.output_shape
         output = lasagne.layers.DenseLayer(layer, 1, num_leading_axes=1,
-                                           nonlinearity=None, b=None)
+                                           nonlinearity=lasagne.nonlinearities.sigmoid)
         
         return output
     
@@ -180,10 +176,12 @@ class Inpainting(object):
         real_score = lasagne.layers.get_output(self.disciminator)
         fake_score = lasagne.layers.get_output(self.disciminator, self.generate)
         
-        self.cost_Dsc = (real_score - fake_score).mean() 
+#         self.cost_Dsc = (real_soore - fake_score).mean()
+        self.cost_Dsc = (lasagne.objectives.binary_crossentropy(real_soore, 1) + lasagne.objectives.binary_crossentropy(fake_score, 0)).mean()
         self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='Discriminative cost function')
         
-        self.cost_Gen = fake_score.mean()
+#         self.cost_Gen = fake_score.mean()
+        self.cost_Gen = lasagne.objectives.binary_crossentropy(fake_score, 1).mean()
         self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, name='Generative cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
@@ -338,26 +336,26 @@ class Inpainting(object):
                     batch_size=64, 
                     valid_batch_size=128, 
                     saveto='params/model', 
-                    optimizer=lasagne.updates.rmsprop,
+                    optimizer=lasagne.updates.adam,
                     patience=5, 
-                    lrate=0.00005, 
+                    lrate=0.0002, 
                     dispFreq=50, 
                     validFreq=-1, 
                     saveFreq=-1, 
                     max_epochs=40,
-                    n_critic=5,
+                    n_critic=1,
                     clip_params=0.01,
                     ):
         print 'Computing gradient...'
-        updates = optimizer(self.cost, self.generator_params, lrate*10)
+        updates = optimizer(self.cost, self.generator_params, lrate)
         self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
 
-        updates_Dsc = optimizer(-self.cost_Dsc, self.discriminator_params, lrate)
-        for param in lasagne.layers.get_all_params(self.disciminator, trainable=True, regularizable=True):
-            updates_Dsc[param] = tensor.clip(updates_Dsc[param], -clip_params, clip_params)
+        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate, beta1=0.5)
+#         for param in lasagne.layers.get_all_params(self.disciminator, trainable=True, regularizable=True):
+#             updates_Dsc[param] = tensor.clip(updates_Dsc[param], -clip_params, clip_params)
         self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
         
-        updates_Gen = optimizer(-self.cost_Gen, self.generator_params, lrate)
+        updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate, beta1=0.5)
         self.f_update_Gen = theano.function([self.x, self.mask], self.cost_Gen, updates=updates_Gen)
             
         print('Optimization')
@@ -431,6 +429,7 @@ class Inpainting(object):
                         return 1., 1., 1.
 
                     cost = self.f_update(x, y ,dataset.mask)
+#                     cost = -1
     
                     if numpy.mod(uidx, dispFreq) == 0:
                         nowtime = time.time()
