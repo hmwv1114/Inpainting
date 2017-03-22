@@ -177,10 +177,10 @@ class Inpainting(object):
         
         self.disciminator = self.Discriminate(self.y)
         print self.disciminator.output_shape
-        real_soore = lasagne.layers.get_output(self.disciminator)
+        real_score = lasagne.layers.get_output(self.disciminator)
         fake_score = lasagne.layers.get_output(self.disciminator, self.generate)
         
-        self.cost_Dsc = (real_soore - fake_score).mean() 
+        self.cost_Dsc = (real_score - fake_score).mean() 
         self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='Discriminative cost function')
         
         self.cost_Gen = fake_score.mean()
