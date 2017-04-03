@@ -128,10 +128,10 @@ class Inpainting(object):
             
             return conv
         
-        layer = Discriminate_layer(layer, num_units=32) #32*32
-        layer = Discriminate_layer(layer, num_units=64) #16*16
-        layer = Discriminate_layer(layer, num_units=128) #8*8
-        layer = Discriminate_layer(layer, num_units=256) #4*4
+        layer = Discriminate_layer(layer, num_units=64) #32*32
+        layer = Discriminate_layer(layer, num_units=128) #16*16
+        layer = Discriminate_layer(layer, num_units=256) #8*8
+        layer = Discriminate_layer(layer, num_units=512) #4*4
 #         layer5 = Discriminate_layer(layer4, num_units=256) #2*2
         
 #         layer = lasagne.layers.DenseLayer(layer, 1024, num_leading_axes=1, 
@@ -392,21 +392,24 @@ class Inpainting(object):
                         random_idx = rng.randint(len(kf))
                         _, train_index_sample = kf[random_idx]
                         x = [dataset.train_x[t]for t in train_index_sample]
+                        y0 = [dataset.train_y[t]for t in train_index_sample]
+                        x0, y0 = dataset.prepare_data(x, y0)
+                        cost_Dsc = self.f_update_Dsc(x0, y0, dataset.mask)
                         
                         random_idx = rng.randint(len(kf))
                         _, train_index_sample = kf[random_idx]
-                        y = [dataset.train_y[t]for t in train_index_sample]
+                        y1 = [dataset.train_y[t]for t in train_index_sample]
                         
-                        if len(x) != batch_size or len(y) != batch_size:
+                        if len(x) != batch_size or len(y1) != batch_size:
                             print 'unmatched sample'
                             continue
         
                         # Get the data in numpy.ndarray format
                         # This swap the axis!
                         # Return something of shape (minibatch maxlen, n samples)
-                        x, y = dataset.prepare_data(x, y)
+                        x1, y1 = dataset.prepare_data(x, y1)
         
-                        cost_Dsc = self.f_update_Dsc(x, y, dataset.mask)
+                        cost_Dsc = self.f_update_Dsc(x1, y1, dataset.mask)
                         
                         if numpy.isnan(cost_Dsc) or numpy.isinf(cost_Dsc):
                             print 'bad cost detected: ', cost_Dsc
@@ -492,7 +495,7 @@ class Inpainting(object):
         self.show_examples()
         return valid_decode_err
         
-dataset = Mscoco('D:/workspace/Data/inpainting/')
+dataset = Mscoco('../Data/inpainting/')
 model = Inpainting()
 # model.learn_model(dataset, saveto='params/model.npz')
 # model.load_model(saveto='params/model.npz')
