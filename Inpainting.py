@@ -10,6 +10,7 @@ import numpy
 import theano
 import theano.tensor as tensor
 import lasagne
+import lasagne.layers.dnn
 import PIL.Image as Image
 
 from Utils import *
@@ -55,14 +56,14 @@ class Inpainting(object):
         
         input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), x)
         layer = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
-        layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
+        layer = lasagne.layers.dnn.batch_norm_dnn(layer, beta=None, gamma=None)
         
         def encoder_layer(input, mask, num_units, ksize=(3,3), pooling=True):
             conv = lasagne.layers.Conv2DLayer(input, num_units, ksize, pad='same')
-            conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
+            conv = lasagne.layers.dnn.batch_norm_dnn(conv, beta=None, gamma=None)
             if pooling:
                 conv = lasagne.layers.Conv2DLayer(conv, num_units, (2,2), stride=2)
-                conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
+                conv = lasagne.layers.dnn.batch_norm_dnn(conv, beta=None, gamma=None)
                 mask = tensor.signal.pool.pool_2d(mask, (2,2), ignore_border=True)
             output = ApplyMask(conv, mask=mask)
             print output.output_shape
@@ -82,7 +83,7 @@ class Inpainting(object):
         
         layer = lasagne.layers.DenseLayer(encoder, 64, num_leading_axes=2)
         layer = lasagne.layers.reshape(layer, ([0], [1], 8, 8))
-        layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
+        layer = lasagne.layers.dnn.batch_norm_dnn(layer, beta=None, gamma=None)
         print layer.output_shape
         
         def decode_layer(input, input_units, output_units, 
@@ -90,17 +91,16 @@ class Inpainting(object):
                          ksize=(3,3), depool=True):
             if depool:
                 input = lasagne.layers.Deconv2DLayer(input, input_units, (2, 2), stride=2)
-                input = lasagne.layers.BatchNormLayer(input, beta=None, gamma=None)
+                input = lasagne.layers.dnn.batch_norm_dnn(input, beta=None, gamma=None)
                 
             deconv = lasagne.layers.Deconv2DLayer(input, output_units, ksize, crop='same', 
                                                   nonlinearity=nonlinearity)
             if output_units != 3:
-                deconv = lasagne.layers.BatchNormLayer(deconv, beta=None, gamma=None)
+                deconv = lasagne.layers.dnn.batch_norm_dnn(deconv, beta=None, gamma=None)
             
             print deconv.output_shape
             return deconv
         
-#         layer0 = decode_layer(reshape1, 1024, 512)
 #         layer = decode_layer(layer, 512, 256)
         layer = decode_layer(layer, 256, 128)
         layer = decode_layer(layer, 128, 64)
@@ -112,18 +112,21 @@ class Inpainting(object):
         
         return output
     
-    def Discriminate(self, input):
+    def Discriminate(self, input, output_nonlin=lasagne.nonlinearities.sigmoid):
         print 'Initialling discriminator...'
-        
-        input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), input)
-        layer = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
+
+        if isinstance(input, lasagne.layers.Layer):
+            layer = input
+        else:
+            input_layer = lasagne.layers.InputLayer((None, 64, 64, 3), input)
+            layer = lasagne.layers.dimshuffle(input_layer, [0,3,1,2])
         
         def Discriminate_layer(input, num_units, ksize=(3,3), pooling=True):
             conv = lasagne.layers.Conv2DLayer(input, num_units, ksize, pad='same', nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
-            conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
+            conv = lasagne.layers.dnn.batch_norm_dnn(conv, beta=None, gamma=None)
             if pooling:
                 conv = lasagne.layers.Conv2DLayer(conv, num_units, (2,2), stride=2, nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
-                conv = lasagne.layers.BatchNormLayer(conv, beta=None, gamma=None)
+                conv = lasagne.layers.dnn.batch_norm_dnn(conv, beta=None, gamma=None)
             print conv.output_shape
             
             return conv
@@ -136,10 +139,10 @@ class Inpainting(object):
         
 #         layer = lasagne.layers.DenseLayer(layer, 1024, num_leading_axes=1, 
 #                                           nonlinearity=lasagne.nonlinearities.LeakyRectify(0.2))
-#         layer = lasagne.layers.BatchNormLayer(layer, beta=None, gamma=None)
+#         layer = lasagne.layers.dnn.batch_norm_dnn(layer, beta=None, gamma=None)
 #         print layer.output_shape
         output = lasagne.layers.DenseLayer(layer, 1, num_leading_axes=1,
-                                           nonlinearity=lasagne.nonlinearities.sigmoid)
+                                           nonlinearity=output_nonlin)
         
         return output
     
@@ -153,6 +156,21 @@ class Inpainting(object):
     def Cost_l2(self, y_hat, y):
         cost = tensor.mean(tensor.sqr(y_hat - y))
         return cost
+    
+    def show_examples(self, dataset, batchsize, figname='example'):
+        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:batchsize], dtype='float32') / 255. * 2. - 1., dataset.mask)
+        generate = self.f_generate(numpy.array(dataset.valid_x[:batchsize], dtype='float32') / 255. * 2. - 1., dataset.mask)
+        original = self.f_original(numpy.array(dataset.valid_x[:batchsize], dtype='float32') / 255. * 2. - 1., 
+                                   numpy.array(dataset.valid_y[:batchsize], dtype='float32') / 255. * 2. - 1.)
+        
+        y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
+        generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
+        original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
+        
+        fig = numpy.int64((numpy.concatenate([original, generate], axis=1) + 1.) / 2. * 255.) 
+        fig = numpy.clip(fig, 0, 255).astype('uint8')
+        Image.fromarray(fig, mode='RGB').show()
+        Image.fromarray(fig, mode='RGB').save(figname, format='png')
         
     def init_model(self):
         print 'Initialing model'
@@ -164,57 +182,29 @@ class Inpainting(object):
         
         self.decoder = self.Decode(self.encoder)
         
-        self.y_hat = lasagne.layers.get_output(self.decoder)
+        self.y_hat = lasagne.layers.get_output(self.decoder, 
+                                               batch_norm_update_averages=True)
         self.cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
-        self.f_cost = theano.function([self.x, self.y, self.mask], self.cost, name='Reconstruction cost function')
         
         self.generate = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat)
         self.original = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y[:, 16:48, 16:48])
-        
-        self.disciminator = self.Discriminate(self.y)
-        print self.disciminator.output_shape
-        real_score = lasagne.layers.get_output(self.disciminator)
-        fake_score = lasagne.layers.get_output(self.disciminator, self.generate)
-        
-#         self.cost_Dsc = (real_soore - fake_score).mean()
-        self.cost_Dsc = (lasagne.objectives.binary_crossentropy(real_score, 1) + lasagne.objectives.binary_crossentropy(fake_score, 0)).mean()
-        self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, name='Discriminative cost function')
-        
-#         self.cost_Gen = fake_score.mean()
-        self.cost_Gen = lasagne.objectives.binary_crossentropy(fake_score, 1).mean()
-        self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, name='Generative cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
         self.f_test_cost = theano.function([self.x, self.y, self.mask], self.test_cost, name='cost function')
         
         self.generator_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         print len(self.generator_params)
-        self.discriminator_params = lasagne.layers.get_all_params(self.disciminator, trainable=True)
-        print len(self.discriminator_params)
         
-        self.f_yhat = theano.function([self.x, self.mask], self.y_hat, name='yhat')
-        self.f_generate = theano.function([self.x, self.mask], self.generate, name='Generate')
+        self.y_hat_output = lasagne.layers.get_output(self.decoder, batch_norm_update_averages=True)
+        self.generate_output = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat_output)
+        self.f_yhat = theano.function([self.x, self.mask], self.y_hat_output, name='yhat')
+        self.f_generate = theano.function([self.x, self.mask], self.generate_output, name='Generate')
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
-    def show_examples(self, dataset, figname='example'):
-        y_hat = self.f_yhat(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
-        generate = self.f_generate(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., dataset.mask)
-        original = self.f_original(numpy.array(dataset.valid_x[:10], dtype='float32') / 255. * 2. - 1., 
-                                   numpy.array(dataset.valid_y[:10], dtype='float32') / 255. * 2. - 1.)
-        
-        y_hat = y_hat.reshape([y_hat.shape[0] * y_hat.shape[1], y_hat.shape[2], y_hat.shape[3]])
-        generate = generate.reshape([generate.shape[0] * generate.shape[1], generate.shape[2], generate.shape[3]])
-        original = original.reshape([original.shape[0] * original.shape[1], original.shape[2], original.shape[3]])
-        
-        fig = numpy.int64((numpy.concatenate([original, generate], axis=1) + 1.) / 2. * 255.) 
-        fig = numpy.clip(fig, 0, 255).astype('uint8')
-        Image.fromarray(fig, mode='RGB').show()
-        Image.fromarray(fig, mode='RGB').save(figname, format='png')
-        
     def learn_model(self, dataset, 
                     batch_size=32, 
-                    valid_batch_size=128, 
+                    valid_batch_size=64, 
                     saveto='params/model', 
                     optimizer=lasagne.updates.adam,
                     patience=5, 
@@ -294,7 +284,7 @@ class Inpainting(object):
                             
                             self.save_model(saveto)
                             
-                            self.show_examples(dataset)
+                            self.show_examples(dataset, batch_size, 'figures/AE_epoch' + str(eidx) + '.png')
     
                         print 'Valid decode error:', valid_decode_err
     
@@ -333,171 +323,10 @@ class Inpainting(object):
         self.show_examples(dataset)
         return valid_decode_err
         
-    def learn_model_GAN(self, dataset, 
-                    batch_size=64, 
-                    valid_batch_size=128, 
-                    saveto='params/model', 
-                    optimizer=lasagne.updates.adam,
-                    patience=5, 
-                    lrate=0.0002, 
-                    dispFreq=50, 
-                    validFreq=-1, 
-                    saveFreq=-1, 
-                    max_epochs=40,
-                    n_critic=1,
-                    clip_params=0.01,
-                    ):
-        print 'Computing gradient...'
-        updates = optimizer(self.cost, self.generator_params, lrate)
-        self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
-
-        updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate, beta1=0.5)
-#         for param in lasagne.layers.get_all_params(self.disciminator, trainable=True, regularizable=True):
-#             updates_Dsc[param] = tensor.clip(updates_Dsc[param], -clip_params, clip_params)
-        self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
-        
-        updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate, beta1=0.5)
-        self.f_update_Gen = theano.function([self.x, self.mask], self.cost_Gen, updates=updates_Gen)
-            
-        print('Optimization')
-        kf_valid = get_minibatches_idx(len(dataset.valid_x), valid_batch_size)
-    
-        print("%d train examples" % len(dataset.train_x))
-        print("%d valid examples" % len(dataset.valid_x))
-    
-        bad_counter = 0
-    
-        batchnum = len(dataset.train_x) // batch_size
-        if validFreq == -1:
-            validFreq = len(dataset.train_x) // batch_size
-        if saveFreq == -1:
-            saveFreq = len(dataset.train_x) // batch_size
-            
-        uidx = 0  # the number of update done
-        estop = False  # early stop
-        start_time = time.time()
-        
-        try:
-            for eidx in range(max_epochs):
-                n_samples = 0
-    
-                # Get new shuffled index for the training set.
-                kf = get_minibatches_idx(len(dataset.train_x), batch_size, shuffle=True)
-    
-                epoch_start_time = time.time()
-                for _, train_index in kf:
-                    uidx += 1
-                    
-                    for i in range(n_critic):
-                        random_idx = rng.randint(len(kf))
-                        _, train_index_sample = kf[random_idx]
-                        x = [dataset.train_x[t]for t in train_index_sample]
-                        y0 = [dataset.train_y[t]for t in train_index_sample]
-                        x0, y0 = dataset.prepare_data(x, y0)
-                        cost_Dsc = self.f_update_Dsc(x0, y0, dataset.mask)
-                        
-                        random_idx = rng.randint(len(kf))
-                        _, train_index_sample = kf[random_idx]
-                        y1 = [dataset.train_y[t]for t in train_index_sample]
-                        
-                        if len(x) != batch_size or len(y1) != batch_size:
-                            print 'unmatched sample'
-                            continue
-        
-                        # Get the data in numpy.ndarray format
-                        # This swap the axis!
-                        # Return something of shape (minibatch maxlen, n samples)
-                        x1, y1 = dataset.prepare_data(x, y1)
-        
-                        cost_Dsc = self.f_update_Dsc(x1, y1, dataset.mask)
-                        
-                        if numpy.isnan(cost_Dsc) or numpy.isinf(cost_Dsc):
-                            print 'bad cost detected: ', cost_Dsc
-                            return 1., 1., 1.
-    
-                    # Select the random examples for this minibatch
-                    x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
-                         for t in train_index]
-                    y = [dataset.train_y[t]for t in train_index]
-     
-                    # Get the data in numpy.ndarray format
-                    # This swap the axis!
-                    # Return something of shape (minibatch maxlen, n samples)
-                    x, y = dataset.prepare_data(x, y)
-                    n_samples += x.shape[0]
-                     
-                    cost_Gen = self.f_update_Gen(x, dataset.mask)
-    
-                    if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
-                        print 'bad cost detected: ', cost_Gen
-                        return 1., 1., 1.
-
-                    cost = self.f_update(x, y ,dataset.mask)
-#                     cost = -1
-    
-                    if numpy.mod(uidx, dispFreq) == 0:
-                        nowtime = time.time()
-                        print 'Epoch ', eidx, 'Update ', uidx - eidx * batchnum, '/', batchnum, 'Cost Gen', cost_Gen, 'Cost Dsc', cost_Dsc, 'Cost L2', cost, \
-                              'Time cost ', nowtime - start_time, 'Expected epoch time cost ', (nowtime - start_time) * batchnum / uidx
-    
-                    if numpy.mod(uidx, validFreq) == 0:
-                        #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_cost_Dsc, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
-    
-                        self.history_errs.append(valid_decode_err)
-    
-                        if (self.best_p is None 
-                            or 
-                            valid_decode_err <= numpy.array(self.history_errs).min()):
-    
-                            del self.best_p
-                            self.best_p = lasagne.layers.get_all_param_values(self.decoder)
-                            bad_counter = 0
-                            
-                            self.save_model(saveto)
-                            
-                        self.show_examples(dataset, 'GAN_epoch' + str(eidx))
-    
-                        print 'Valid decode error:', valid_decode_err
-    
-                        if (len(self.history_errs) > patience and
-                            valid_decode_err >= numpy.array(self.history_errs)[:-patience].min()):
-                            bad_counter += 1
-                            if bad_counter > patience:
-                                print('Early Stop!')
-                                estop = True
-                                break
-    
-                print 'Seen %d samples' % n_samples
-    
-                if estop:
-                    break
-    
-        except KeyboardInterrupt:
-            print "Training interupted"
-    
-        end_time = time.time()
-        if self.best_p is not None:
-            lasagne.layers.set_all_param_values(self.decoder, self.best_p)
-        else:
-            self.best_p = lasagne.layers.get_all_param_values(self.decoder)
-    
-        #kf_train_sorted = get_minibatches_idx(len(train), batch_size)
-        #train_err = pred_error(f_sentiment, prepare_data, train, kf_train_sorted)
-        valid_decode_err = error(self.f_test_cost, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
-    
-        print 'Valid decode error:', valid_decode_err
-        if saveto:
-            self.save_model(saveto)
-        print 'The code run for %d epochs, with %f sec/epochs' % (
-            (eidx + 1), (end_time - start_time) / (1. * (eidx + 1)))
-        print 'Training took %.1fs' % (end_time - start_time)
-        self.show_examples()
-        return valid_decode_err
-        
-dataset = Mscoco('../Data/inpainting/')
-model = Inpainting()
-# model.learn_model(dataset, saveto='params/model.npz')
-# model.load_model(saveto='params/model.npz')
-# model.show_examples(dataset)
-model.learn_model_GAN(dataset, saveto='params/model_GAN.npz')
+if __name__ == '__main__':
+    dataset = Mscoco('../Data/inpainting/')
+    model = Inpainting()
+    # model.learn_model(dataset, saveto='params/model.npz')
+    # model.load_model(saveto='params/model.npz')
+    # model.show_examples(dataset)
+    model.learn_model(dataset, saveto='params/model_AE.npz')

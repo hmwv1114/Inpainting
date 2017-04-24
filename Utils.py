@@ -29,9 +29,9 @@ def get_minibatches_idx(n, minibatch_size, shuffle=True):
                                     minibatch_start + minibatch_size])
         minibatch_start += minibatch_size
 
-    if (minibatch_start != n):
-        # Make a minibatch out of what is left
-        minibatches.append(idx_list[minibatch_start:])
+#     if (minibatch_start != n):
+#         # Make a minibatch out of what is left
+#         minibatches.append(idx_list[minibatch_start:])
         
     if shuffle:
         numpy.random.shuffle(minibatches)

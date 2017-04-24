@@ -2,7 +2,7 @@ import theano
 import theano.tensor as T
 import numpy
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-from theano.sandbox.cuda.dnn import dnn_conv
+from theano.gpuarray.dnn import dnn_conv
 from generic_utils import *
 import lasagne
 from lasagne import nonlinearities
