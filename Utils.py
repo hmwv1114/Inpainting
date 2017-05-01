@@ -38,7 +38,7 @@ def get_minibatches_idx(n, minibatch_size, shuffle=True):
 
     return zip(range(len(minibatches)), minibatches)
 
-def error(f_cost, prepare_data, data_x, data_y, mask, iterator, verbose=False):
+def error(f_cost, prepare_data, data_x, data_y, data_c, mask, iterator, verbose=False):
     """
     Just compute the error
     f_pred: Theano fct computing the prediction
@@ -47,8 +47,10 @@ def error(f_cost, prepare_data, data_x, data_y, mask, iterator, verbose=False):
     valid_err = 0
     total_words = 0
     for _, valid_index in iterator:
-        x, y = prepare_data([data_x[t] for t in valid_index], [data_y[t] for t in valid_index])
-        preds = f_cost(x, y, mask)
+        x, y, c, cmask = prepare_data([data_x[t] for t in valid_index], 
+                                    [data_y[t] for t in valid_index], 
+                                    [data_c[t] for t in valid_index])
+        preds = f_cost(x, y, mask, c, cmask)
         valid_err += preds.sum()
         total_words += 1
     valid_err = valid_err / total_words

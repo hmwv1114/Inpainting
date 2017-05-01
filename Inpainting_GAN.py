@@ -34,7 +34,12 @@ class Inpainting_GAN(Inpainting):
         self.y = tensor.tensor4(name='y', dtype='float32')
         self.mask = tensor.matrix(name='mask', dtype='float32')
         
-        self.encoder = self.Encode(self.x, self.mask)
+        self.c = tensor.matrix(name='c', dtype='int64')
+        self.cmask = tensor.matrix(name='cmask', dtype='float32')
+        
+        self.c_encoder = self.Cap_Encode(self.c, self.cmask)
+        
+        self.encoder = self.Encode(self.x, self.mask, self.c_encoder)
         
         self.decoder = self.Decode(self.encoder)
         
@@ -55,16 +60,16 @@ class Inpainting_GAN(Inpainting):
         self.cost_Dsc = (lasagne.objectives.binary_crossentropy(real_score, 1) 
                          + lasagne.objectives.binary_crossentropy(fake_score, 0)
                          ).mean()
-        self.f_cost_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, 
+        self.f_cost_Dsc = theano.function([self.x, self.y, self.mask, self.c, self.cmask], self.cost_Dsc, 
                                           name='Discriminative cost function')
         
         self.cost_Gen = lasagne.objectives.binary_crossentropy(fake_score, 1).mean()
-#         self.cost_Gen = 0.1 * self.cost_Gen + 0.9 * self.cost
-        self.f_cost_Gen = theano.function([self.x, self.mask], self.cost_Gen, 
+        self.cost_Gen = 0.5 * self.cost_Gen + 0.5 * self.cost
+        self.f_cost_Gen = theano.function([self.x, self.mask, self.y, self.c, self.cmask], self.cost_Gen, 
                                           name='Generative cost function')
         
         self.test_cost = self.Cost_l2(self.y_hat, self.y[:, 16:48, 16:48])
-        self.f_test_cost = theano.function([self.x, self.y, self.mask], self.test_cost, name='cost function')
+        self.f_test_cost = theano.function([self.x, self.y, self.mask, self.c, self.cmask], self.test_cost, name='cost function')
         
         self.generator_params = lasagne.layers.get_all_params(self.decoder, trainable=True)
         print len(self.generator_params)
@@ -73,8 +78,8 @@ class Inpainting_GAN(Inpainting):
         
         self.y_hat_output = lasagne.layers.get_output(self.decoder, batch_norm_update_averages=True)
         self.generate_output = tensor.set_subtensor(self.x[:, 16:48, 16:48], self.y_hat_output)
-        self.f_yhat = theano.function([self.x, self.mask], self.y_hat_output, name='yhat')
-        self.f_generate = theano.function([self.x, self.mask], self.generate_output, name='Generate')
+        self.f_yhat = theano.function([self.x, self.mask, self.c, self.cmask], self.y_hat_output, name='yhat')
+        self.f_generate = theano.function([self.x, self.mask, self.c, self.cmask], self.generate_output, name='Generate')
         self.f_original = theano.function([self.x, self.y], self.original, name='Original')
         print 'Done initial'
         
@@ -94,13 +99,13 @@ class Inpainting_GAN(Inpainting):
                     ):
         print 'Computing gradient...'
         updates = optimizer(self.cost, self.generator_params, lrate)
-        self.f_update = theano.function([self.x, self.y, self.mask], self.cost, updates=updates)
+        self.f_update = theano.function([self.x, self.y, self.mask, self.c, self.cmask], self.cost, updates=updates)
 
         updates_Dsc = optimizer(self.cost_Dsc, self.discriminator_params, lrate, beta1=0.5)
-        self.f_update_Dsc = theano.function([self.x, self.y, self.mask], self.cost_Dsc, updates=updates_Dsc)
+        self.f_update_Dsc = theano.function([self.x, self.y, self.mask, self.c, self.cmask], self.cost_Dsc, updates=updates_Dsc)
         
         updates_Gen = optimizer(self.cost_Gen, self.generator_params, lrate, beta1=0.5)
-        self.f_update_Gen = theano.function([self.x, self.mask], self.cost_Gen, updates=updates_Gen)
+        self.f_update_Gen = theano.function([self.x, self.mask, self.y, self.c, self.cmask], self.cost_Gen, updates=updates_Gen)
             
         print('Optimization')
         kf_valid = get_minibatches_idx(len(dataset.valid_x), valid_batch_size)
@@ -135,9 +140,10 @@ class Inpainting_GAN(Inpainting):
                         random_idx = rng.randint(len(kf))
                         _, train_index_sample = kf[random_idx]
                         x = [dataset.train_x[t]for t in train_index_sample]
+                        c = [dataset.train_c[t]for t in train_index_sample]
                         y0 = [dataset.train_y[t]for t in train_index_sample]
-                        x0, y0 = dataset.prepare_data(x, y0)
-                        cost_Dsc = self.f_update_Dsc(x0, y0, dataset.mask)
+                        x0, y0, c, cmask = dataset.prepare_data(x, y0, c)
+                        cost_Dsc = self.f_update_Dsc(x0, y0, dataset.mask, c, cmask)
                         
                         random_idx = rng.randint(len(kf))
                         _, train_index_sample = kf[random_idx]
@@ -150,9 +156,9 @@ class Inpainting_GAN(Inpainting):
                         # Get the data in numpy.ndarray format
                         # This swap the axis!
                         # Return something of shape (minibatch maxlen, n samples)
-                        x1, y1 = dataset.prepare_data(x, y1)
+                        x1, y1, c, cmask = dataset.prepare_data(x, y1, c)
         
-                        cost_Dsc = self.f_update_Dsc(x1, y1, dataset.mask)
+                        cost_Dsc = self.f_update_Dsc(x1, y1, dataset.mask, c, cmask)
                         
                         if numpy.isnan(cost_Dsc) or numpy.isinf(cost_Dsc):
                             print 'bad cost detected: ', cost_Dsc
@@ -162,14 +168,15 @@ class Inpainting_GAN(Inpainting):
                     x = [dataset.train_x[t] #+ dataset.mask * numpy.random.randint(0,256,size=[64,64,3])
                          for t in train_index]
                     y = [dataset.train_y[t]for t in train_index]
+                    c = [dataset.train_c[t]for t in train_index]
      
                     # Get the data in numpy.ndarray format
                     # This swap the axis!
                     # Return something of shape (minibatch maxlen, n samples)
-                    x, y = dataset.prepare_data(x, y)
+                    x, y, c, cmask = dataset.prepare_data(x, y, c)
                     n_samples += x.shape[0]
                      
-                    cost_Gen = self.f_update_Gen(x, dataset.mask)
+                    cost_Gen = self.f_update_Gen(x, dataset.mask, y, c, cmask)
     
                     if numpy.isnan(cost_Gen) or numpy.isinf(cost_Gen):
                         print 'bad cost detected: ', cost_Gen
@@ -185,7 +192,7 @@ class Inpainting_GAN(Inpainting):
     
                     if numpy.mod(uidx, validFreq) == 0:
                         #train_err = pred_error(f_decode, prepare_data, train, kf)
-                        valid_decode_err = error(self.f_cost_Dsc, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.mask, kf_valid)
+                        valid_decode_err = error(self.f_cost_Dsc, dataset.prepare_data, dataset.valid_x, dataset.valid_y, dataset.valid_c, dataset.mask, kf_valid)
     
                         self.history_errs.append(valid_decode_err)
     
@@ -240,7 +247,7 @@ class Inpainting_GAN(Inpainting):
 
 if __name__ == '__main__':
     dataset = Mscoco('../Data/inpainting/')
-    model = Inpainting_GAN()
+    model = Inpainting_GAN(max(dataset.wdict.values()) + 1)
     # model.learn_model(dataset, saveto='params/model.npz')
     # model.load_model(saveto='params/model.npz')
     # model.show_examples(dataset)

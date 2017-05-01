@@ -44,6 +44,19 @@ class ApplyNoise(lasagne.layers.Layer):
     def get_output_for(self, input, **kwargs):
         return input * self.mask[None, None, :, :] + self.rng.normal(input.shape) * (1. - self.mask[None, None, :, :])
     
+class ApplyCaption(lasagne.layers.MergeLayer):
+    def __init__(self, incomings, **kwargs):
+        super(ApplyCaption, self).__init__(incomings, **kwargs)
+        
+    def get_output_shape_for(self, input_shapes):
+        return input_shapes[0]
+        
+    def get_output_for(self, inputs, **kwargs):
+        img = inputs[0]
+        cap = inputs[1]
+        
+        return tensor.set_subtensor(img[:,:,3:5,3:5], cap)
+    
 class ChooseLayer(lasagne.layers.MergeLayer):
     
     def __init__(self, incomings, **kwargs):
